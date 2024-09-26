@@ -1,8 +1,8 @@
-import { closeMainWindow, getPreferenceValues, open, showHUD } from "@raycast/api";
+import { closeMainWindow, open, showHUD } from "@raycast/api";
 import { ApiResponseEvents, ApiResponseMoment } from "./hooks/useEvent.types";
-import { NativePreferences } from "./types/preferences";
-import { axiosPromiseData, fetcher } from "./utils/axiosPromise";
 import { getOriginalEventIDFromSyncEvent } from "./utils/events";
+import { fetchPromise } from "./utils/fetcher";
+
 /**
  * This function is used to join a meeting.
  * If it succeeds, it returns true.
@@ -15,8 +15,7 @@ import { getOriginalEventIDFromSyncEvent } from "./utils/events";
  * @param {ApiResponseMoment["event"] | ApiResponseMoment["nextEvent"]} event - The event to join.
  * @returns {Promise<boolean>} - Returns a promise that resolves to a boolean indicating whether the meeting was joined successfully.
  */
-const joinMeeting = async (event: ApiResponseMoment["event"] | ApiResponseMoment["nextEvent"]) => {
-  const { apiUrl } = getPreferenceValues<NativePreferences>();
+const joinMeeting = async (event: ApiResponseMoment["event"]) => {
   if (!event) return false;
 
   // If event has a meeting URL, open it
@@ -29,9 +28,7 @@ const joinMeeting = async (event: ApiResponseMoment["event"] | ApiResponseMoment
     if (!id) return false;
 
     // try fetching original event
-    const [eventRequest, eventError] = await axiosPromiseData<ApiResponseEvents[number]>(
-      fetcher(`${apiUrl}/events/${id}`)
-    );
+    const [eventRequest, eventError] = await fetchPromise<ApiResponseEvents[number]>(`/events/${id}`);
 
     if (eventError || !eventRequest) {
       console.error(eventError);
@@ -47,12 +44,10 @@ const joinMeeting = async (event: ApiResponseMoment["event"] | ApiResponseMoment
 };
 
 export default async function Command() {
-  const { apiUrl } = getPreferenceValues<NativePreferences>();
-
   await closeMainWindow();
   await showHUD("Joining meeting...");
 
-  const [momentRequest, momentError] = await axiosPromiseData<ApiResponseMoment>(fetcher(`${apiUrl}/moment/next`));
+  const [momentRequest, momentError] = await fetchPromise<ApiResponseMoment>(`/moment/next`);
 
   if (momentError || !momentRequest) {
     console.error(momentError);
@@ -61,8 +56,6 @@ export default async function Command() {
   }
   // if event does not succeed, try next event
   if (!(await joinMeeting(momentRequest.event))) {
-    if (!(await joinMeeting(momentRequest.nextEvent))) {
-      await showHUD("No meetings found.");
-    }
+    await showHUD("No meetings found.");
   }
 }

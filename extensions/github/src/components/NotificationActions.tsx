@@ -1,30 +1,30 @@
 import { Action, ActionPanel, Icon, LaunchType, Toast, launchCommand, open, showToast } from "@raycast/api";
-import { MutatePromise } from "@raycast/utils";
-import { useMemo } from "react";
+import { MutatePromise, usePromise } from "@raycast/utils";
 
 import { getGitHubClient } from "../api/githubClient";
 import { getErrorMessage } from "../helpers/errors";
 import { getGitHubURL, getNotificationSubtitle, getNotificationTypeTitle } from "../helpers/notifications";
-import { NotificationsResponse } from "../notifications";
-
-export type Notification = NotificationsResponse["data"][0];
+import { NotificationWithIcon } from "../notifications";
 
 type NotificationActionsProps = {
-  notification: Notification;
+  notification: NotificationWithIcon;
   userId?: string;
-  mutateList: MutatePromise<Notification[] | undefined>;
+  mutateList: MutatePromise<NotificationWithIcon[] | undefined>;
 };
 
 export default function NotificationActions({ notification, userId, mutateList }: NotificationActionsProps) {
   const { octokit } = getGitHubClient();
 
-  const url = useMemo(() => getGitHubURL(notification, userId), [notification, userId]);
+  const { data: url } = usePromise(
+    (notification, userId) => getGitHubURL(notification, userId),
+    [notification, userId],
+  );
 
   async function markNotificationAsRead() {
     await showToast({ style: Toast.Style.Animated, title: "Marking notification as read" });
 
     try {
-      await octokit.rest.activity.markThreadAsRead({ thread_id: parseInt(notification.id) });
+      await octokit.activity.markThreadAsRead({ thread_id: parseInt(notification.id) });
       await mutateList();
       await launchCommand({ name: "unread-notifications", type: LaunchType.UserInitiated });
 
@@ -41,11 +41,16 @@ export default function NotificationActions({ notification, userId, mutateList }
     }
   }
 
-  async function openNotificationAndMarkAsRead() {
+  async function openNotification(isUnreadNotification: boolean) {
     try {
-      await open(url);
-      await octokit.rest.activity.markThreadAsRead({ thread_id: parseInt(notification.id) });
-      await mutateList();
+      if (url) {
+        await open(url);
+      }
+
+      if (isUnreadNotification) {
+        await octokit.activity.markThreadAsRead({ thread_id: parseInt(notification.id) });
+        await mutateList();
+      }
     } catch (error) {
       await showToast({
         style: Toast.Style.Failure,
@@ -57,13 +62,13 @@ export default function NotificationActions({ notification, userId, mutateList }
 
   async function acceptInvitation() {
     try {
-      const invitations = await octokit.rest.repos.listInvitationsForAuthenticatedUser();
+      const invitations = await octokit.repos.listInvitationsForAuthenticatedUser();
 
       const invitation = invitations.data.find(
-        (invitation) => invitation.repository.url === notification.repository.url,
+        (invitation: { repository: { url: string } }) => invitation.repository.url === notification.repository.url,
       );
 
-      await octokit.rest.repos.acceptInvitationForAuthenticatedUser({
+      await octokit.repos.acceptInvitationForAuthenticatedUser({
         invitation_id: invitation?.id || 0,
       });
 
@@ -82,7 +87,7 @@ export default function NotificationActions({ notification, userId, mutateList }
     await showToast({ style: Toast.Style.Animated, title: "Marking all notifications as read" });
 
     try {
-      await octokit.rest.activity.markNotificationsAsRead();
+      await octokit.activity.markNotificationsAsRead();
       await mutateList();
       await launchCommand({ name: "unread-notifications", type: LaunchType.UserInitiated });
 
@@ -103,7 +108,7 @@ export default function NotificationActions({ notification, userId, mutateList }
     await showToast({ style: Toast.Style.Animated, title: "Unsubscribing" });
 
     try {
-      await octokit.rest.activity.deleteThreadSubscription({ thread_id: parseInt(notification.id) });
+      await octokit.activity.deleteThreadSubscription({ thread_id: parseInt(notification.id) });
       await mutateList();
 
       await showToast({
@@ -119,18 +124,14 @@ export default function NotificationActions({ notification, userId, mutateList }
     }
   }
 
+  const isRepoInvitation = notification.subject.type === "RepositoryInvitation";
+
   return (
     <ActionPanel title={getNotificationSubtitle(notification)}>
       <Action
-        title={notification.subject.type === "RepositoryInvitation" ? "Accept Invitation" : "Open in Browser"}
+        title={isRepoInvitation ? "Accept Invitation" : "Open in Browser"}
         icon={Icon.Globe}
-        onAction={() =>
-          notification.subject && notification.subject.type === "RepositoryInvitation"
-            ? acceptInvitation()
-            : notification.unread
-              ? openNotificationAndMarkAsRead()
-              : open(url)
-        }
+        onAction={() => (isRepoInvitation ? acceptInvitation() : openNotification(notification.unread))}
       />
       {notification.unread ? (
         <>
@@ -152,11 +153,13 @@ export default function NotificationActions({ notification, userId, mutateList }
         onAction={unsubscribe}
       />
       <ActionPanel.Section>
-        <Action.CopyToClipboard
-          content={url}
-          title={`Copy ${getNotificationTypeTitle(notification)} URL`}
-          shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
-        />
+        {url ? (
+          <Action.CopyToClipboard
+            content={url}
+            title={`Copy ${getNotificationTypeTitle(notification)} URL`}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
+          />
+        ) : null}
 
         <Action.CopyToClipboard
           content={notification.subject.title}

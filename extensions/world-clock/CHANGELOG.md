@@ -1,5 +1,20 @@
 # World Clock Changelog
 
+## [Fix Half Hour Time Zone] - 2024-09-24
+
+- Fix the bug that the half-hour time zone is not included in current time
+
+## [Update Refresh interval] - 2024-07-30
+
+- Update the refresh interval to 10 seconds
+
+## [Update Extension Icon] - 2024-07-30
+
+- Support set avatar for starred time zones
+- Support duplicate starred time zones
+- Show the first starred time zones in the menu bar
+- Update the extension and command icons
+
 ## [Update Memo Icon] - 2023-10-16
 
 - Now the Grid view will show the memo icon

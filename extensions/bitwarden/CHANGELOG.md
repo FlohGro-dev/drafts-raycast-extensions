@@ -1,5 +1,13 @@
 # Bitwarden Changelog
 
+## [Fix] - 2024-07-25
+
+- Prevent search vault sections from changing order
+
+## [New Commands] - 2024-04-10
+
+- Added 3 Send commands (Search, Create and Receive) with delete, edit and remove password actions
+
 ## [Fixes and Improvements] - 2024-03-28
 
 - Fixed lock screen bypassing by increasing timeout
