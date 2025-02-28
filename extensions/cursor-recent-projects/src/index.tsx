@@ -1,13 +1,14 @@
-import { ActionPanel, Action, Grid, Icon, showToast, open, Toast, openExtensionPreferences } from "@raycast/api";
-import { useState } from "react";
+import { ActionPanel, Action, Grid, Icon, showToast, open, Toast, LaunchProps, Color } from "@raycast/api";
+import { useEffect, useState } from "react";
 import { basename, dirname } from "path";
 import tildify from "tildify";
 import { fileURLToPath } from "url";
 import { useRecentEntries } from "./db";
 import type { RemoveMethods } from "./db";
-import { keepSectionOrder, closeOtherWindows, terminalApp } from "./preferences";
+import { keepSectionOrder, closeOtherWindows, terminalApp, showGitBranch, gitBranchColor, layout } from "./preferences";
 import { EntryType } from "./types";
 import type { EntryLike, PinMethods } from "./types";
+import type { LaunchContext } from "./integrations/types";
 import {
   filterEntriesByType,
   filterUnpinnedEntries,
@@ -15,6 +16,7 @@ import {
   isFolderEntry,
   isRemoteEntry,
   isRemoteWorkspaceEntry,
+  isValidHexColor,
   isWorkspaceEntry,
 } from "./utils";
 import {
@@ -24,12 +26,12 @@ import {
   ListOrGridDropdownItem,
   ListOrGridSection,
   ListOrGridItem,
-  ListOrGridEmptyView,
 } from "./grid-or-list";
 import { usePinnedEntries } from "./pinned";
-import { runAppleScriptSync } from "run-applescript";
+import { ProjectProvider, useProject } from "./contexts/ProjectContext";
+import { getGitBranch } from "./utils/git";
 
-export default function Command() {
+export default function Command(props: LaunchProps<{ launchContext: LaunchContext }>) {
   const { data, isLoading, error, ...removeMethods } = useRecentEntries();
   const [type, setType] = useState<EntryType | null>(null);
   const { pinnedEntries, ...pinnedMethods } = usePinnedEntries();
@@ -41,28 +43,30 @@ export default function Command() {
   }
 
   return (
-    <ListOrGrid
-      columns={6}
-      inset={Grid.Inset.Medium}
-      searchBarPlaceholder="Search recent projects..."
-      isLoading={isLoading}
-      filtering={{ keepSectionOrder }}
-      searchBarAccessory={<EntryTypeDropdown onChange={setType} />}
-    >
-      <ListOrGridSection title="Pinned Projects">
-        {pinnedEntries.filter(filterEntriesByType(type)).map((entry: EntryLike, index: number) => (
-          <EntryItem key={`pinned-${index}`} entry={entry} pinned={true} {...pinnedMethods} {...removeMethods} />
-        ))}
-      </ListOrGridSection>
-      <ListOrGridSection title="Recent Projects">
-        {data
-          ?.filter(filterUnpinnedEntries(pinnedEntries))
-          ?.filter(filterEntriesByType(type))
-          .map((entry: EntryLike, index: number) => (
-            <EntryItem key={index} entry={entry} {...pinnedMethods} {...removeMethods} />
+    <ProjectProvider launchContext={props.launchContext}>
+      <ListOrGrid
+        columns={6}
+        inset={Grid.Inset.Medium}
+        searchBarPlaceholder="Search recent projects..."
+        isLoading={isLoading}
+        filtering={{ keepSectionOrder }}
+        searchBarAccessory={<EntryTypeDropdown onChange={setType} />}
+      >
+        <ListOrGridSection title="Pinned Projects">
+          {pinnedEntries.filter(filterEntriesByType(type)).map((entry: EntryLike, index: number) => (
+            <EntryItem key={`pinned-${index}`} entry={entry} pinned={true} {...pinnedMethods} {...removeMethods} />
           ))}
-      </ListOrGridSection>
-    </ListOrGrid>
+        </ListOrGridSection>
+        <ListOrGridSection title="Recent Projects">
+          {data
+            ?.filter(filterUnpinnedEntries(pinnedEntries))
+            ?.filter(filterEntriesByType(type))
+            .map((entry: EntryLike, index: number) => (
+              <EntryItem key={index} entry={entry} {...pinnedMethods} {...removeMethods} />
+            ))}
+        </ListOrGridSection>
+      </ListOrGrid>
+    </ProjectProvider>
   );
 }
 
@@ -125,51 +129,79 @@ function LocalItem(props: { entry: EntryLike; uri: string; pinned?: boolean } & 
   const prettyPath = tildify(path);
   const subtitle = dirname(prettyPath);
   const keywords = path.split("/");
+  const [gitBranch, setGitBranch] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function fetchGitBranch() {
+      try {
+        const branch = await getGitBranch(path);
+        if (mounted) {
+          setGitBranch(branch);
+        }
+      } catch (error) {
+        // Silently handle errors - they're already handled in getGitBranch
+      }
+    }
+
+    fetchGitBranch();
+    return () => {
+      mounted = false;
+    };
+  }, [path, name]);
 
   const getTitle = (revert = false) => {
     return `Open in Cursor ${closeOtherWindows !== revert ? "and Close Other" : ""}`;
   };
 
-  const getAction = (revert = false) => {
-    return () => {
-      if (closeOtherWindows !== revert) {
-        runAppleScriptSync(`
-        tell application "System Events"
-          tell process "Cursor"
-            repeat while window 1 exists
-              click button 1 of window 1
-            end repeat
-          end tell
-        end tell
-        `);
-      }
-      open(props.uri, "Cursor");
-    };
+  const { openProject } = useProject();
+
+  const handleOpenProject = (revert = false) => {
+    openProject(props.uri, closeOtherWindows !== revert);
   };
+
+  const accessories = [];
+  if (showGitBranch && gitBranch) {
+    const branchColor =
+      gitBranchColor && isValidHexColor(gitBranchColor)
+        ? { light: gitBranchColor, dark: gitBranchColor, adjustContrast: false }
+        : Color.Green;
+    accessories.push({
+      tag: {
+        value: gitBranch,
+        color: branchColor,
+      },
+      tooltip: `Git Branch: ${gitBranch}`,
+    });
+  }
+
+  const displaySubtitle = showGitBranch && gitBranch && layout === "grid" ? `${gitBranch} • ${subtitle}` : subtitle;
 
   return (
     <ListOrGridItem
       id={props.pinned ? path : undefined}
       title={name}
-      subtitle={subtitle}
+      subtitle={displaySubtitle}
       icon={{ fileIcon: path }}
       content={{ fileIcon: path }}
       keywords={keywords}
+      accessories={accessories}
       actions={
         <ActionPanel>
           <ActionPanel.Section>
-            <Action title={getTitle()} icon="action-icon.png" onAction={getAction()} />
+            <Action title={getTitle()} icon="action-icon.png" onAction={() => handleOpenProject()} />
             <Action.ShowInFinder path={path} />
             <Action
               title={getTitle(true)}
               icon="action-icon.png"
-              onAction={getAction(true)}
+              onAction={() => handleOpenProject(true)}
               shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
             />
             <Action.OpenWith path={path} shortcut={{ modifiers: ["cmd"], key: "o" }} />
             {isFolderEntry(props.entry) && terminalApp && (
               <Action
-                title={`Open With ${terminalApp.name}`}
+                title={`Open with ${terminalApp.name}`}
                 icon={{ fileIcon: terminalApp.path }}
                 shortcut={{ modifiers: ["cmd", "shift"], key: "o" }}
                 onAction={() =>

@@ -42,9 +42,8 @@ export const getRepostMarkdown = (displayName: string, handle: string) => {
 };
 
 export const getQuotedPostMarkdownView = async (postAuthor: string, post: ViewRecord, imageEmbeds: string[]) => {
-  const postMarkdown = (await getMarkdownText((post.value as BskyRecord).text))
-    .replace(/\n/g, "\n\n")
-    .replace(/^/gm, "> ");
+  const { text = "" } = post.value as BskyRecord;
+  const postMarkdown = (await getMarkdownText(text)).replace(/\n/g, "\n\n").replace(/^/gm, "> ");
 
   const postTime = getReadableDate(post.indexedAt);
   const displayNameText = post.author.displayName ? `**${post.author.displayName.trim()}**` : "";
@@ -151,6 +150,7 @@ export const parseFeed = async (bskyFeed: AppBskyFeedDefs.FeedViewPost[]): Promi
     bskyFeed
       .filter((item) => item !== null && item.post !== null)
       .filter((item) => item.post.record)
+      .filter((item) => item.reply?.root.blocked !== true)
       .map(async (item) => {
         let postReason: PostReason = null;
 
@@ -162,7 +162,7 @@ export const parseFeed = async (bskyFeed: AppBskyFeedDefs.FeedViewPost[]): Promi
           };
         }
 
-        if (item.reply && Object.keys(item.reply).length > 0) {
+        if (item.reply && Object.keys(item.reply).length > 0 && item.reply.parent.notFound !== true) {
           const author = item.reply.parent.author as ProfileViewBasic;
           postReason = {
             type: "reply",
@@ -178,7 +178,7 @@ export const parseFeed = async (bskyFeed: AppBskyFeedDefs.FeedViewPost[]): Promi
 
         let markdownView = "";
 
-        if (item.reply?.root && item.reply?.root.uri !== item.reply?.parent.uri) {
+        if (item.reply?.root && item.reply?.root.uri !== item.reply?.parent.uri && item.reply.root.notFound !== true) {
           let imageEmbeds: string[] = [];
           const root = item.reply.root as PostView;
           if (root.embed?.$type === BlueskyImageEmbedType) {
@@ -188,7 +188,7 @@ export const parseFeed = async (bskyFeed: AppBskyFeedDefs.FeedViewPost[]): Promi
           markdownView = markdownView + (await getPostMarkdownView(root, imageEmbeds));
         }
 
-        if (item.reply?.parent) {
+        if (item.reply?.parent && item.reply.parent.notFound !== true) {
           let imageEmbeds: string[] = [];
           const parent = item.reply.parent as PostView;
           if (parent.embed?.$type === BlueskyImageEmbedType) {
